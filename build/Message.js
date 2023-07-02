@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.Message = exports.MessageCodes = exports.MessageCode = exports.MessageType = void 0;
 const Option_1 = require("./Option");
 var MessageType;
 (function (MessageType) {
@@ -172,10 +173,10 @@ class Message {
      */
     isPartialMessage() {
         // start with the response option, since that's more likely
-        const block2option = Option_1.findOption(this.options, "Block2");
+        const block2option = (0, Option_1.findOption)(this.options, "Block2");
         if (this.code.isResponse() && block2option != null)
             return true;
-        const block1option = Option_1.findOption(this.options, "Block1");
+        const block1option = (0, Option_1.findOption)(this.options, "Block1");
         if (this.code.isRequest() && block1option != null)
             return true;
         return false;

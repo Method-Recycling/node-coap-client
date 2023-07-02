@@ -1,10 +1,11 @@
 /// <reference types="node" />
+/// <reference types="node" />
 import { dtls } from "node-dtls-client";
 import { ContentFormats } from "./ContentFormats";
 import { Origin } from "./lib/Origin";
 import { MessageCode } from "./Message";
 import { URL } from "url";
-export declare type RequestMethod = "get" | "post" | "put" | "delete";
+export type RequestMethod = "get" | "post" | "put" | "delete";
 /** Options to control CoAP requests */
 export interface RequestOptions {
     /** Whether to keep the socket connection alive. Speeds up subsequent requests */
@@ -21,13 +22,13 @@ export interface CoapResponse {
     format: ContentFormats;
     payload?: Buffer;
 }
-export declare type ConnectionResult = true | "timeout" | "auth failed" | Error;
+export type ConnectionResult = true | "timeout" | "auth failed" | Error;
 export interface SecurityParameters {
     psk: {
         [identity: string]: string;
     };
 }
-export declare type CompatOptions = dtls.Options["compat"];
+export type CompatOptions = dtls.Options["compat"];
 /**
  * provides methods to access CoAP server resources
  */

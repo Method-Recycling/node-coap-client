@@ -9,6 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.CoapClient = void 0;
 const crypto = require("crypto");
 const dgram = require("dgram");
 const net_1 = require("net");
@@ -30,7 +31,7 @@ const debug = debugPackage("node-coap-client");
 const npmVersion = require("../package.json").version;
 debug(`CoAP client version ${npmVersion}`);
 function urlToString(url) {
-    return `${url.protocol}//${Hostname_1.getURLSafeHostname(url.hostname)}:${url.port}${url.pathname}`;
+    return `${url.protocol}//${(0, Hostname_1.getURLSafeHostname)(url.hostname)}:${url.port}${url.pathname}`;
 }
 class PendingRequest {
     constructor(initial) {
@@ -108,7 +109,7 @@ function validateBlockSize(size) {
 function normalizeHostname(hostname) {
     // make sure noone gave us a full URI
     if (!hostname.startsWith("coap://") && !hostname.startsWith("coaps://")) {
-        hostname = `coaps://${Hostname_1.getURLSafeHostname(hostname)}`;
+        hostname = `coaps://${(0, Hostname_1.getURLSafeHostname)(hostname)}`;
     }
     return new url_1.URL(hostname).hostname.toLowerCase();
 }
@@ -274,7 +275,7 @@ class CoapClient {
                 msgOptions.push(Option_1.Options.Block2(0, true, options.preferredBlockSize));
             }
             // create the promise we're going to return
-            const response = DeferredPromise_1.createDeferredPromise();
+            const response = (0, DeferredPromise_1.createDeferredPromise)();
             // create the message we're going to send
             const message = CoapClient.createMessage(type, code, messageId, token, msgOptions, payload);
             // create the retransmission info
@@ -338,7 +339,7 @@ class CoapClient {
                 return false;
             }
             // create the promise we're going to return
-            const response = DeferredPromise_1.createDeferredPromise();
+            const response = (0, DeferredPromise_1.createDeferredPromise)();
             // create the message we're going to send.
             // An empty message with type CON equals a ping and provokes a RST from the server
             const messageId = connection.lastMsgId = incrementMessageID(connection.lastMsgId);
@@ -423,18 +424,16 @@ class CoapClient {
         const message = request.originalMessage;
         const connection = request.connection;
         // requests for the next block are a new message with a new message id
-        const oldMsgID = message.messageId;
         message.messageId = connection.lastMsgId = incrementMessageID(connection.lastMsgId);
         // this means we have to update the dictionaries aswell, so the request is still found
         CoapClient.pendingRequestsByMsgID.set(message.messageId, request);
-        CoapClient.pendingRequestsByMsgID.delete(oldMsgID);
         // even if the original request was an observe, the partial requests are not
         message.options = message.options.filter(o => o.name !== "Observe");
         // Change (or create) the Block2 option, so the server knows which block to send
-        let block2Opt = Option_1.findOption(message.options, "Block2");
+        let block2Opt = (0, Option_1.findOption)(message.options, "Block2");
         if (block2Opt == null) {
             // respect the response options and request the next block
-            const { blockNumber, blockSize } = Option_1.findOption(request.partialResponse.options, "Block2");
+            const { blockNumber, blockSize } = (0, Option_1.findOption)(request.partialResponse.options, "Block2");
             block2Opt = Option_1.Options.Block2(blockNumber + 1, true, blockSize);
             message.options.push(block2Opt);
         }
@@ -446,7 +445,7 @@ class CoapClient {
         // enable retransmission for this updated request
         request.retransmit = CoapClient.createRetransmissionInfo(message.messageId);
         // and enqueue it for sending
-        CoapClient.send(connection, message, "high");
+        CoapClient.send(connection, message);
     }
     /**
      * Observes a CoAP resource
@@ -540,42 +539,49 @@ class CoapClient {
     static onMessage(origin, message, rinfo) {
         // parse the CoAP message
         const coapMsg = Message_1.Message.parse(message);
-        LogMessage_1.logMessage(coapMsg);
-        if (coapMsg.code.isEmpty()) {
-            // ACK or RST
-            // see if we have a request for this message id
+        (0, LogMessage_1.logMessage)(coapMsg);
+        // At this point we arn't worried about the message contents, we either need to free up to CoAP layer
+        // Or we need to ACK the client as soon as possible
+        // As this is a client ONLY implementation it makes this a bit easier
+        // We treat every message recieved as valid if it has a matching messageId
+        if (coapMsg.type === Message_1.MessageType.ACK) {
             const request = CoapClient.findRequest({ msgID: coapMsg.messageId });
             if (request != null) {
-                // reduce the request's concurrency, since it was handled on the server
+                //Now that we have an ACK response for a valid message ID, also reduce the request's concurrency, so other requests can be fired off
+                debug(`Received ACK for message 0x${coapMsg.messageId.toString(16)}, stopping retransmission...`);
+                console.log('Received ACK for message ' + coapMsg.messageId);
+                CoapClient.stopRetransmission(request);
+                CoapClient.pendingRequestsByMsgID.delete(coapMsg.messageId);
                 request.concurrency = 0;
-                // handle the message
-                switch (coapMsg.type) {
-                    case Message_1.MessageType.ACK:
-                        debug(`received ACK for message 0x${coapMsg.messageId.toString(16)}, stopping retransmission...`);
-                        // the other party has received the message, stop resending
-                        CoapClient.stopRetransmission(request);
-                        break;
-                    case Message_1.MessageType.RST:
-                        if (request.originalMessage.type === Message_1.MessageType.CON &&
-                            request.originalMessage.code === Message_1.MessageCodes.empty) { // this message was a ping (empty CON, answered by RST)
-                            // resolve the promise
-                            debug(`received response to ping with ID 0x${coapMsg.messageId.toString(16)}`);
-                            request.promise.resolve();
-                        }
-                        else {
-                            // the other party doesn't know what to do with the request, forget it
-                            debug(`received RST for message 0x${coapMsg.messageId.toString(16)}, forgetting the request...`);
-                            CoapClient.forgetRequest({ request });
-                        }
-                        break;
+            }
+        }
+        else if (coapMsg.type === Message_1.MessageType.CON) {
+            const tokenString = coapMsg.token.toString("hex");
+            const request = CoapClient.findRequest({ token: tokenString });
+            if (request != null) {
+                debug(`Recieved CON and sending ACK for message 0x${coapMsg.messageId.toString(16)}`);
+                console.log('Recieved CON sending ACK for message ' + coapMsg.messageId);
+                const ACK = CoapClient.createMessage(Message_1.MessageType.ACK, Message_1.MessageCodes.empty, coapMsg.messageId);
+                CoapClient.send(request.connection, ACK, "immediate");
+            }
+        }
+        else if (coapMsg.type === Message_1.MessageType.RST) {
+            const tokenString = coapMsg.token.toString("hex");
+            const request = CoapClient.findRequest({ token: tokenString });
+            if (request != null) {
+                if (request.originalMessage.type === Message_1.MessageType.CON &&
+                    request.originalMessage.code === Message_1.MessageCodes.empty) { // this message was a ping (empty CON, answered by RST)
+                    debug(`received response to ping with ID 0x${coapMsg.messageId.toString(16)}`);
+                    request.promise.resolve();
+                }
+                else {
+                    // the other party doesn't know what to do with the request, forget it
+                    debug(`received RST for message 0x${coapMsg.messageId.toString(16)}, forgetting the request...`);
+                    CoapClient.forgetRequest({ request });
                 }
             }
         }
-        else if (coapMsg.code.isRequest()) {
-            // we are a client implementation, we should not get requests
-            // ignore them
-        }
-        else if (coapMsg.code.isResponse()) {
+        if (coapMsg.code.isResponse()) {
             // this is a response, find out what to do with it
             if (coapMsg.token && coapMsg.token.length) {
                 // this message has a token, check which request it belongs to
@@ -583,22 +589,22 @@ class CoapClient {
                 const request = CoapClient.findRequest({ token: tokenString });
                 if (request) {
                     // if the message is an acknowledgement, stop resending
-                    if (coapMsg.type === Message_1.MessageType.ACK) {
-                        debug(`received ACK for message 0x${coapMsg.messageId.toString(16)}, stopping retransmission...`);
-                        CoapClient.stopRetransmission(request);
-                    }
+                    //if (coapMsg.type === MessageType.ACK) {
+                    //	debug(`received ACK for message 0x${coapMsg.messageId.toString(16)}, stopping retransmission...`);
+                    //	CoapClient.stopRetransmission(request);
+                    //}
                     // parse options
                     let contentFormat = null;
                     if (coapMsg.options && coapMsg.options.length) {
                         // see if the response contains information about the content format
-                        const optCntFmt = Option_1.findOption(coapMsg.options, "Content-Format");
+                        const optCntFmt = (0, Option_1.findOption)(coapMsg.options, "Content-Format");
                         if (optCntFmt)
                             contentFormat = optCntFmt.value;
                     }
                     let responseIsComplete = true;
                     if (coapMsg.isPartialMessage()) {
                         // Check if we expect more blocks
-                        const blockOption = Option_1.findOption(coapMsg.options, "Block2"); // we know this is != null
+                        const blockOption = (0, Option_1.findOption)(coapMsg.options, "Block2"); // we know this is != null
                         // TODO: check for outdated partial responses
                         // remember the most recent message, but extend the stored buffer beforehand
                         if (request.partialResponse != null) {
@@ -616,10 +622,6 @@ class CoapClient {
                             responseIsComplete = false;
                         }
                     }
-                    // Now that we have a response, also reduce the request's concurrency,
-                    // so other requests can be fired off
-                    if (coapMsg.type === Message_1.MessageType.ACK)
-                        request.concurrency = 0;
                     // while we only have a partial response, we cannot return it to the caller yet
                     if (!responseIsComplete)
                         return;
@@ -638,12 +640,6 @@ class CoapClient {
                         request.promise.resolve(response);
                         // after handling one-time requests, delete the info about them
                         CoapClient.forgetRequest({ request });
-                    }
-                    // also acknowledge the packet if neccessary
-                    if (coapMsg.type === Message_1.MessageType.CON) {
-                        debug(`sending ACK for message 0x${coapMsg.messageId.toString(16)}`);
-                        const ACK = CoapClient.createMessage(Message_1.MessageType.ACK, Message_1.MessageCodes.empty, coapMsg.messageId);
-                        CoapClient.send(request.connection, ACK, "immediate");
                     }
                 }
                 else { // request == null
@@ -914,7 +910,7 @@ class CoapClient {
         else {
             debug(`getConnection(${originString}) => establishing new connection`);
             // create a promise and start the connection queue
-            const ret = DeferredPromise_1.createDeferredPromise();
+            const ret = (0, DeferredPromise_1.createDeferredPromise)();
             CoapClient.pendingConnections.set(originString, ret);
             setTimeout(CoapClient.workOffPendingConnections, 0);
             return ret;
@@ -978,8 +974,8 @@ class CoapClient {
      */
     static getSocket(origin) {
         return __awaiter(this, void 0, void 0, function* () {
-            const socketAddress = yield Hostname_1.getSocketAddressFromURLSafeHostname(origin.hostname);
-            const socketType = net_1.isIPv6(socketAddress) ? "udp6" : "udp4";
+            const socketAddress = yield (0, Hostname_1.getSocketAddressFromURLSafeHostname)(origin.hostname);
+            const socketType = (0, net_1.isIPv6)(socketAddress) ? "udp6" : "udp4";
             switch (origin.protocol) {
                 case "coap:":
                     // simply return a normal udp socket
@@ -998,7 +994,7 @@ class CoapClient {
                         dtlsOpts.compat = CoapClient.dtlsCompat.get(origin.hostname);
                     }
                     // return a promise we resolve as soon as the connection is secured
-                    const ret = DeferredPromise_1.createDeferredPromise();
+                    const ret = (0, DeferredPromise_1.createDeferredPromise)();
                     // try connecting
                     const onConnection = () => {
                         debug("successfully created socket for origin " + origin.toString());

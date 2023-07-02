@@ -9,18 +9,19 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.getSocketAddressFromURLSafeHostname = exports.getSocketAddressFromURLSafeHostnameWithoutLookup = exports.getURLSafeHostname = void 0;
 const dns = require("dns");
 const net_1 = require("net");
 /** Converts the given hostname to be used in an URL. Wraps IPv6 addresses in square brackets */
 function getURLSafeHostname(hostname) {
-    if (net_1.isIPv6(hostname))
+    if ((0, net_1.isIPv6)(hostname))
         return `[${hostname}]`;
     return hostname;
 }
 exports.getURLSafeHostname = getURLSafeHostname;
 function getSocketAddressFromURLSafeHostnameWithoutLookup(hostname) {
     // IPv4 addresses are fine
-    if (net_1.isIPv4(hostname))
+    if ((0, net_1.isIPv4)(hostname))
         return hostname;
     // IPv6 addresses are wrapped in [], which need to be removed
     if (/^\[.+\]$/.test(hostname))
@@ -31,12 +32,12 @@ exports.getSocketAddressFromURLSafeHostnameWithoutLookup = getSocketAddressFromU
 function getSocketAddressFromURLSafeHostname(hostname) {
     return __awaiter(this, void 0, void 0, function* () {
         // IPv4 addresses are fine
-        if (net_1.isIPv4(hostname))
+        if ((0, net_1.isIPv4)(hostname))
             return hostname;
         // IPv6 addresses are wrapped in [], which need to be removed
         if (/^\[.+\]$/.test(hostname)) {
             const potentialIPv6 = hostname.slice(1, -1);
-            if (net_1.isIPv6(potentialIPv6))
+            if ((0, net_1.isIPv6)(potentialIPv6))
                 return potentialIPv6;
         }
         // This is a hostname, look it up

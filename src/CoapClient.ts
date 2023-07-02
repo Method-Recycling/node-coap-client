@@ -545,11 +545,9 @@ export class CoapClient {
 		const connection = request.connection;
 
 		// requests for the next block are a new message with a new message id
-		const oldMsgID = message.messageId;
 		message.messageId = connection.lastMsgId = incrementMessageID(connection.lastMsgId);
 		// this means we have to update the dictionaries aswell, so the request is still found
 		CoapClient.pendingRequestsByMsgID.set(message.messageId, request);
-		CoapClient.pendingRequestsByMsgID.delete(oldMsgID);
 
 		// even if the original request was an observe, the partial requests are not
 		message.options = message.options.filter(o => o.name !== "Observe");
@@ -570,7 +568,7 @@ export class CoapClient {
 		// enable retransmission for this updated request
 		request.retransmit = CoapClient.createRetransmissionInfo(message.messageId);
 		// and enqueue it for sending
-		CoapClient.send(connection, message, "high");
+		CoapClient.send(connection, message);
 	}
 
 	/**
@@ -684,41 +682,49 @@ export class CoapClient {
 		const coapMsg = Message.parse(message);
 		logMessage(coapMsg);
 
-		if (coapMsg.code.isEmpty()) {
-			// ACK or RST
-			// see if we have a request for this message id
+		// At this point we arn't worried about the message contents, we either need to free up to CoAP layer
+		// Or we need to ACK the client as soon as possible
+		// As this is a client ONLY implementation it makes this a bit easier
+		// We treat every message recieved as valid if it has a matching messageId
+		if (coapMsg.type === MessageType.ACK){
 			const request = CoapClient.findRequest({ msgID: coapMsg.messageId });
 			if (request != null) {
-				// reduce the request's concurrency, since it was handled on the server
+				//Now that we have an ACK response for a valid message ID, also reduce the request's concurrency, so other requests can be fired off
+				debug(`Received ACK for message 0x${coapMsg.messageId.toString(16)}, stopping retransmission...`);
+				console.log('Received ACK for message ' + coapMsg.messageId);
+				CoapClient.stopRetransmission(request);
+				CoapClient.pendingRequestsByMsgID.delete(coapMsg.messageId);
 				request.concurrency = 0;
-				// handle the message
-				switch (coapMsg.type) {
-					case MessageType.ACK:
-						debug(`received ACK for message 0x${coapMsg.messageId.toString(16)}, stopping retransmission...`);
-						// the other party has received the message, stop resending
-						CoapClient.stopRetransmission(request);
-						break;
-
-					case MessageType.RST:
-						if (
-							request.originalMessage.type === MessageType.CON &&
-							request.originalMessage.code === MessageCodes.empty
-						) { // this message was a ping (empty CON, answered by RST)
-							// resolve the promise
-							debug(`received response to ping with ID 0x${coapMsg.messageId.toString(16)}`);
-							(request.promise as DeferredPromise<CoapResponse>).resolve();
-						} else {
-							// the other party doesn't know what to do with the request, forget it
-							debug(`received RST for message 0x${coapMsg.messageId.toString(16)}, forgetting the request...`);
-							CoapClient.forgetRequest({ request });
-						}
-						break;
+			}
+		}
+		else if (coapMsg.type === MessageType.CON) {
+			const tokenString = coapMsg.token.toString("hex");
+			const request = CoapClient.findRequest({ token: tokenString });
+			if (request != null) {
+				debug(`Recieved CON and sending ACK for message 0x${coapMsg.messageId.toString(16)}`);
+				console.log('Recieved CON sending ACK for message ' + coapMsg.messageId);
+				const ACK = CoapClient.createMessage(MessageType.ACK, MessageCodes.empty, coapMsg.messageId);
+				CoapClient.send(request.connection, ACK, "immediate");
+			}
+		}
+		else if (coapMsg.type === MessageType.RST) {
+			const tokenString = coapMsg.token.toString("hex");
+			const request = CoapClient.findRequest({ token: tokenString });
+			if (request != null) {
+				if (request.originalMessage.type === MessageType.CON &&
+					request.originalMessage.code === MessageCodes.empty) { // this message was a ping (empty CON, answered by RST)
+					debug(`received response to ping with ID 0x${coapMsg.messageId.toString(16)}`);
+					(request.promise as DeferredPromise<CoapResponse>).resolve();
+				}
+				else {
+					// the other party doesn't know what to do with the request, forget it
+					debug(`received RST for message 0x${coapMsg.messageId.toString(16)}, forgetting the request...`);
+					CoapClient.forgetRequest({ request });
 				}
 			}
-		} else if (coapMsg.code.isRequest()) {
-			// we are a client implementation, we should not get requests
-			// ignore them
-		} else if (coapMsg.code.isResponse()) {
+		}
+		
+	 	if (coapMsg.code.isResponse()) {
 			// this is a response, find out what to do with it
 			if (coapMsg.token && coapMsg.token.length) {
 				// this message has a token, check which request it belongs to
@@ -727,10 +733,10 @@ export class CoapClient {
 				if (request) {
 
 					// if the message is an acknowledgement, stop resending
-					if (coapMsg.type === MessageType.ACK) {
-						debug(`received ACK for message 0x${coapMsg.messageId.toString(16)}, stopping retransmission...`);
-						CoapClient.stopRetransmission(request);
-					}
+					//if (coapMsg.type === MessageType.ACK) {
+					//	debug(`received ACK for message 0x${coapMsg.messageId.toString(16)}, stopping retransmission...`);
+					//	CoapClient.stopRetransmission(request);
+					//}
 
 					// parse options
 					let contentFormat: ContentFormats = null;
@@ -763,10 +769,6 @@ export class CoapClient {
 						}
 					}
 
-					// Now that we have a response, also reduce the request's concurrency,
-					// so other requests can be fired off
-					if (coapMsg.type === MessageType.ACK) request.concurrency = 0;
-
 					// while we only have a partial response, we cannot return it to the caller yet
 					if (!responseIsComplete) return;
 
@@ -785,19 +787,7 @@ export class CoapClient {
 						(request.promise as DeferredPromise<CoapResponse>).resolve(response);
 						// after handling one-time requests, delete the info about them
 						CoapClient.forgetRequest({ request });
-					}
-
-					// also acknowledge the packet if neccessary
-					if (coapMsg.type === MessageType.CON) {
-						debug(`sending ACK for message 0x${coapMsg.messageId.toString(16)}`);
-						const ACK = CoapClient.createMessage(
-							MessageType.ACK,
-							MessageCodes.empty,
-							coapMsg.messageId,
-						);
-						CoapClient.send(request.connection, ACK, "immediate");
-					}
-
+					}					
 				} else { // request == null
 					// no request found for this token, send RST so the server stops sending
 

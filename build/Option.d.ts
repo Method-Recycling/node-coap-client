@@ -3,7 +3,7 @@ import { ContentFormats } from "./ContentFormats";
 /**
  * All defined option names
  */
-export declare type OptionName = "Observe" | "Uri-Port" | "Content-Format" | "Max-Age" | "Accept" | "Block2" | "Block1" | "Size2" | "Size1" | "If-Match" | "ETag" | "If-None-Match" | "Uri-Host" | "Location-Path" | "Uri-Path" | "Uri-Query" | "Location-Query" | "Proxy-Uri" | "Proxy-Scheme";
+export type OptionName = "Observe" | "Uri-Port" | "Content-Format" | "Max-Age" | "Accept" | "Block2" | "Block1" | "Size2" | "Size1" | "If-Match" | "ETag" | "If-None-Match" | "Uri-Host" | "Location-Path" | "Uri-Path" | "Uri-Query" | "Location-Query" | "Proxy-Uri" | "Proxy-Scheme";
 /**
  * Abstract base class for all message options. Provides methods to parse and serialize.
  */
