@@ -549,7 +549,7 @@ class CoapClient {
             if (request != null) {
                 //Now that we have an ACK response for a valid message ID, also reduce the request's concurrency, so other requests can be fired off
                 debug(`Received ACK for message 0x${coapMsg.messageId.toString(16)}, stopping retransmission...`);
-                console.log('Received ACK for message ' + coapMsg.messageId);
+                //console.log('Received ACK for message ' + coapMsg.messageId);
                 CoapClient.stopRetransmission(request);
                 CoapClient.pendingRequestsByMsgID.delete(coapMsg.messageId);
                 request.concurrency = 0;
@@ -560,7 +560,7 @@ class CoapClient {
             const request = CoapClient.findRequest({ token: tokenString });
             if (request != null) {
                 debug(`Recieved CON and sending ACK for message 0x${coapMsg.messageId.toString(16)}`);
-                console.log('Recieved CON sending ACK for message ' + coapMsg.messageId);
+                //console.log('Recieved CON sending ACK for message ' + coapMsg.messageId);
                 const ACK = CoapClient.createMessage(Message_1.MessageType.ACK, Message_1.MessageCodes.empty, coapMsg.messageId);
                 CoapClient.send(request.connection, ACK, "immediate");
             }
